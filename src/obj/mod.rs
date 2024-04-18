@@ -16,3 +16,17 @@ pub struct IdentifyResp {
 pub struct StartIdentifyReq {
 
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize, Hash)]
+pub struct NodeInfo {
+    /// API version
+    pub api_version: u32
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize, Hash)]
+pub struct NodeInfoResp {
+    /// If the versions are compatible with each other.
+    pub compatible: bool,
+
+    pub info: NodeInfo
+}
