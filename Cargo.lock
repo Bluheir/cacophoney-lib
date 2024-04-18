@@ -68,6 +68,7 @@ dependencies = [
  "serde",
  "thiserror",
  "tokio",
+ "tower-async",
 ]
 
 [[package]]
@@ -432,6 +433,28 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "tower-async"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57d4b9f1f79aa6c44c843b7c52f55e0a4aa3f39f16fcf9b57e5f6ee6e9b92253"
+dependencies = [
+ "tower-async-layer",
+ "tower-async-service",
+]
+
+[[package]]
+name = "tower-async-layer"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3640d292da3a02313e994a5b2d779e7ebe37dc5bf1493df57d92f790d90b3239"
+
+[[package]]
+name = "tower-async-service"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d36d33ce13e35cb9b26ef69ec041f1a1a4c05a101064435b147fe612074a70af"
 
 [[package]]
 name = "unicode-ident"
