@@ -12,8 +12,8 @@ pub struct Context {
 
 #[derive(Debug)]
 pub struct Endpoint {
+    pub addr: SocketAddr,
     ctx: Arc<Context>,
-    addr: SocketAddr,
     conns: Mutex<mpsc::Receiver<Connection>>,
 }
 
@@ -35,9 +35,9 @@ impl Endpoint {
 
 impl crate::Endpoint for Endpoint {
     type Conn = Connection;
-    type Err = Infallible;
+    type Error = Infallible;
 
-    async fn connect(&self, _domain: &str, addr: SocketAddr) -> Result<Self::Conn, Self::Err> {
+    async fn connect(&self, _domain: &str, addr: SocketAddr) -> Result<Self::Conn, Self::Error> {
         let nodes = self.ctx.nodes.read().await;
         let node = nodes.get(&addr).unwrap().clone();
 
@@ -47,23 +47,19 @@ impl crate::Endpoint for Endpoint {
         Ok(pair.1)
     }
 
-    async fn accept(&self) -> Result<Self::Conn, Self::Err> {
+    async fn accept(&self) -> Result<Self::Conn, Self::Error> {
         let mut conn = self.conns.lock().await;
         Ok(conn.recv().await.unwrap())
     }
 }
 
-pub struct Request {
+pub struct Responder {
     pub resp: oneshot::Sender<RespMessage>,
-    pub req: ReqMessage,
 }
 
-impl crate::Request for Request {
+impl crate::Request for Responder {
     type Error = Infallible;
 
-    fn request_msg(&self) -> &ReqMessage {
-        &self.req
-    }
     async fn respond(self, resp: RespMessage) -> Result<(), Self::Error> {
         let _ = self.resp.send(resp);
 
@@ -73,8 +69,8 @@ impl crate::Request for Request {
 
 #[derive(Debug)]
 pub struct Connection {
-    pub send_req: mpsc::Sender<Request>,
-    pub recv_req: Mutex<mpsc::Receiver<Request>>,
+    send_req: mpsc::Sender<(ReqMessage, Responder)>,
+    recv_req: Mutex<mpsc::Receiver<(ReqMessage, Responder)>>,
 }
 
 pub fn connection_pair() -> (Connection, Connection) {
@@ -97,7 +93,7 @@ pub enum Error {
 }
 
 impl crate::Connection for Connection {
-    type Request = Request;
+    type Responder = Responder;
 
     type Read = tokio::net::TcpStream;
     type Write = tokio::net::TcpStream;
@@ -113,8 +109,9 @@ impl crate::Connection for Connection {
         todo!()
     }
 
-    async fn next_request(&self) -> Result<Self::Request, Self::ReqError> {
+    async fn next_request(&self) -> Result<(ReqMessage, Self::Responder), Self::ReqError> {
         let mut reqs = self.recv_req.lock().await;
+
         match reqs.recv().await {
             Some(v) => Ok(v),
             None => Err(Error::Closed)
@@ -124,12 +121,11 @@ impl crate::Connection for Connection {
 
     async fn request(&self, req: ReqMessage) -> Result<RespMessage, Self::ReqError> {
         let (resp, recv) = oneshot::channel();
-        let req = Request {
+        let resp = Responder {
             resp,
-            req,
         };
 
-        match self.send_req.send(req).await {
+        match self.send_req.send((req, resp)).await {
             Ok(_) => {},
             Err(_) => return Err(Error::Closed),
         }
