@@ -47,8 +47,8 @@ pub struct InvalidTypeError {
 pub enum ReqMessage {
     #[serde(rename = "NODE_INFO")]
     Connect(NodeInfo),
-    #[serde(rename = "START_IDENTIFY")]
-    StartIdentify(StartIdentifyReq),
+    #[serde(rename = "PRE_IDENTIFY")]
+    PreIdentify(PreIdentifyReq),
     #[serde(rename = "IDENTIFY")]
     Identify(IdentifyReq)
 }
@@ -58,13 +58,13 @@ impl ObjectType for ReqMessage {
         match self {
             Self::Connect(v) => v.object_type(),
             Self::Identify(v) => v.object_type(),
-            Self::StartIdentify(v) => v.object_type(),
+            Self::PreIdentify(v) => v.object_type(),
         }
     }
 }
 convert_impl!(NodeInfo, "NODE_INFO", ReqMessage, Connect);
 convert_impl!(IdentifyReq, "IDENTIFY", ReqMessage, Identify);
-convert_impl!(StartIdentifyReq, "START_IDENTIFY", ReqMessage, StartIdentify);
+convert_impl!(PreIdentifyReq, "PRE_IDENTIFY", ReqMessage, PreIdentify);
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub enum RespMessage {
