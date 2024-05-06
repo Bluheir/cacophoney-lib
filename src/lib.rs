@@ -3,6 +3,8 @@
 pub mod obj;
 pub mod mock;
 pub mod node;
+pub mod crypto;
+
 #[cfg(test)]
 mod tests;
 

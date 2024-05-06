@@ -13,7 +13,14 @@ tower-async = "0.2.0"
 thiserror = "1.0.58"
 
 # serde
+serde_with = "3.8.1"
 serde = { version = "1.0.0", features = ["derive"] }
 
 # other
 arcstr = { version = "1.1.5", features = ["serde"] }
+
+# cryptography
+rand = "0.8.5"
+time = "0.3.36"
+blake3 = "1.5.1"
+libsecp256k1 = "0.7.1"
