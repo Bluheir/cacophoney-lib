@@ -5,25 +5,15 @@ pub use message::*;
 pub use signables::*;
 use serde::{Deserialize, Serialize};
 
-use crate::crypto::{PublicKey, Signature};
+use crate::crypto::{KeyTriad, PublicKey, Signature};
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct IdentifyReq {
-    pub keys: Vec<KeyTriad>
+    pub keys: Vec<KeyTriad<Signed>>
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
-pub struct KeyTriad {
-    #[serde(rename = "publicKey")]
-    pub public_key: PublicKey,
-    pub signature: Signature,
-    pub signed: Signed,
-}
-
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
-pub struct IdentifyResp {
-
-}
+pub struct IdentifyResp { }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct PreIdentifyReq { }

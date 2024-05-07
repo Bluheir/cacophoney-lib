@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
+use crate::obj::{IdentifyData, Signed};
+
 /// The size (in bytes) of a public key.
 pub const PUBLIC_KEY_SIZE: usize = 33;
 
@@ -159,11 +161,18 @@ impl ToHashMsg for &Vec<u8> {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct SigKeyPair {
-    /// The digital signature of this pair.
-    pub signature: Signature,
-    /// The public key of this pair.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub struct KeyTriad<T> {
     #[serde(rename = "publicKey")]
     pub public_key: PublicKey,
+    pub signature: Signature,
+    pub signed: T,
+}
+
+impl KeyTriad<Signed> {
+    pub fn gen_signed(key: &PrivateKey, identify: &IdentifyData) -> Self {
+        let ser = serde_cbor::to_vec(identify).unwrap();
+        
+        KeyTriad { public_key: key.derive_public(), signature: key.sign(&ser), signed: Signed::cbor(ser) }
+    }
 }
