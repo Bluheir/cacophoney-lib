@@ -4,6 +4,8 @@ use arcstr::ArcStr;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::crypto::{hash, HashMsg, ToHashMsg};
+
 /// The size (in bytes) of the nonce.
 pub const SALT_SIZE: usize = 16;
 
@@ -19,6 +21,28 @@ pub enum SignedConvertError {
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub struct CachedSigned<T> {
+    pub signable: Signable<T>,
+    pub value: SignedData,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub enum SignedData {
+    Json(ArcStr),
+    Cbor(Vec<u8>),
+}
+impl ToHashMsg for &SignedData {
+    type Output = HashMsg;
+
+    fn to_hash_msg(self) -> Self::Output {
+        match self {
+            SignedData::Json(value) => hash(value),
+            SignedData::Cbor(value) => hash(value),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct Signed {
     #[serde(rename = "JSON")]
     #[serde(default)]
@@ -27,7 +51,32 @@ pub struct Signed {
     #[serde(default)]
     pub cbor: Option<Vec<u8>>,
 }
+
 impl Signed {
+    pub const fn cbor(cbor: Vec<u8>) -> Self {
+        Self {
+            cbor: Some(cbor),
+            json: None
+        }
+    }
+    pub const fn json(json: ArcStr) -> Self {
+        Self {
+            json: Some(json),
+            cbor: None,
+        }
+    }
+    pub fn to_cached<T>(self) -> Result<CachedSigned<T>, SignedConvertError>
+    where for<'a> T: Deserialize<'a>
+    {
+        let signable = self.to_signable()?;
+
+        let value = match self.cbor {
+            Some(value) => SignedData::Cbor(value),
+            None => SignedData::Json(self.json.unwrap()),
+        };
+
+        Ok(CachedSigned { signable, value })
+    }
     pub fn to_signable<'a, T: Deserialize<'a>>(
         &'a self,
     ) -> Result<Signable<T>, SignedConvertError> {
@@ -63,25 +112,9 @@ pub struct IdentifyData {
     /// The starting timestamp.
     #[serde(rename = "startTime")]
     pub start_time: u64,
+
+    #[serde(rename = "expireTime")]
+    /// The expiration timestamp.
+    pub expire_time: u64
 }
 
-/// Identify data additionally containing the expiry. Sent from the signer to the node.
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
-pub struct FullIdentifyData {
-    #[serde(flatten)]
-    pub identify_data: IdentifyData,
-    /// The expiration date of this identify.
-    pub expiry: u64,
-}
-impl Deref for FullIdentifyData {
-    type Target = IdentifyData;
-
-    fn deref(&self) -> &Self::Target {
-        &self.identify_data
-    }
-}
-impl DerefMut for FullIdentifyData {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.identify_data
-    }
-}
