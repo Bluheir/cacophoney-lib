@@ -4,6 +4,7 @@ pub mod obj;
 pub mod mock;
 pub mod node;
 pub mod crypto;
+mod utils;
 
 #[cfg(test)]
 mod tests;
