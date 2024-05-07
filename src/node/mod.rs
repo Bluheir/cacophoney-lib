@@ -1,106 +1,132 @@
-use core::net::SocketAddr;
+use std::convert::Infallible;
 use std::sync::{Arc, Weak};
+use futures::Future;
 
 pub mod error;
 
+use crate::crypto::*;
 use crate::obj::*;
-use crate::*;
+use crate::utils;
 use error::*;
+use rand::RngCore;
+use tokio::sync::RwLock;
+use tower_async::Service;
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ServerHandle {}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Node<E: Endpoint> {
-    pub endpoint: E,
-    pub info: NodeInfo,
-    pub handle: Option<Arc<ServerHandle>>,
+#[derive(Debug)]
+pub struct ServerHandle {
+    key_to_endpoint: scc::HashMap<PublicKey, Arc<InboundEndpoint>>
 }
 
-impl<E: Endpoint> Node<E> {
-    pub const fn client(endpoint: E, info: NodeInfo) -> Self {
-        Self {
-            endpoint,
-            info,
-            handle: None,
-        }
-    }
-    pub fn server(endpoint: E, info: NodeInfo) -> Self {
-        Self {
-            endpoint,
-            info,
-            handle: Some(Default::default()),
-        }
-    }
-    /// Gets the inner server handle from this node, if any.
-    pub fn server_handle(&self) -> Option<&ServerHandle> {
-        self.handle.as_ref().map(|v| &**v)
-    }
+#[derive(Debug)]
+pub struct OutboundEndpoint {
+    server_hdl: Option<Weak<ServerHandle>>,
+}
 
-    pub async fn accept(
-        &self,
-    ) -> Result<NodeConnection<E::Conn>, (Option<<E::Conn as Connection>::Responder>, ConnError<E::Error, <E::Conn as Connection>::ReqError>)> {
-        // Wait for the next connection
-        let conn = self
-            .endpoint
-            .accept()
-            .await
-            .map_err(|err| (None, ConnError::ConnectionErr(err)))?;
+#[derive(Debug)]
+pub struct InboundEndpoint {
+    server_hdl: Option<Weak<ServerHandle>>,
+    identify_data: RwLock<Option<IdentifyData>>,
+    public_keys: RwLock<Vec<PublicKey>>,
+    identities: scc::HashMap<PublicKey, KeyTriad<CachedSigned<IdentifyData>>>,
+}
 
-        let (req, responder) = conn.next_request().await.map_err(|v| (None, ConnError::RequestErr(v)))?;
+impl Service<PreIdentifyReq> for InboundEndpoint {
+    type Response = IdentifyData;
+    type Error = Infallible;
 
-        let info: NodeInfo = match req.try_into() {
-            Ok(v) => v,
-            Err(err) => return Err((Some(responder), ConnError::TypeErr(err)))
+    async fn call(&self, _req: PreIdentifyReq) -> Result<Self::Response, Self::Error> {
+        // generate salt using RNG
+        let mut salt = [0u8; SALT_SIZE];
+        let mut rng = rand::thread_rng();
+        rng.fill_bytes(&mut salt);
+        drop(rng);
+
+        let start_time = utils::now();
+        let identify_data = IdentifyData {
+            salt,
+            start_time,
+            // this expires in 5 seconds. add 5000 milliseconds.
+            expire_time: start_time + 5000,
         };
 
-        if info.api_version > crate::CURRENT_VERSION {
-            return Err((Some(responder), ConnError::IncompatibleVersion(info.api_version)))
-        }
+        let mut identify_data_w = self.identify_data.write().await;
+        *identify_data_w = Some(identify_data.clone());
 
-        Ok(NodeConnection {
-            conn,
-            info,
-            handle: self.handle.as_ref().map(|v| Arc::downgrade(v))
-        })
+        Ok(identify_data)
     }
+}
+impl Service<PreIdentifyReq> for Arc<InboundEndpoint> {
+    type Response = <InboundEndpoint as Service<PreIdentifyReq>>::Response;
+    type Error = <InboundEndpoint as Service<PreIdentifyReq>>::Error;
 
-    pub async fn connect(
+    fn call(
         &self,
-        domain: &str,
-        addr: SocketAddr,
-    ) -> Result<NodeConnection<E::Conn>, ConnError<E::Error, <E::Conn as Connection>::ReqError>> {
-        // Connect to the endpoint
-        let conn = self
-            .endpoint
-            .connect(domain, addr)
-            .await
-            .map_err(ConnError::ConnectionErr)?;
-
-        // Send our node info to the endpoint and receive their info in response
-        let resp: NodeInfoResp = conn
-            .request(self.info.clone().into())
-            .await
-            .map_err(ConnError::RequestErr)?
-            .try_into()?;
-
-        if !resp.compatible {
-            // Return an error telling of the version incompatibilities
-            return Err(ConnError::IncompatibleVersion(resp.info.api_version));
-        }
-
-        Ok(NodeConnection {
-            conn,
-            info: resp.info,
-            handle: self.handle.as_ref().map(|v| Arc::downgrade(v)),
-        })
+        req: PreIdentifyReq,
+    ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
+        (**self).call(req)
     }
 }
+impl Service<KeyTriad<Signed>> for Arc<InboundEndpoint> {
+    type Response = IdentifyResp;
+    type Error = IdentifyReqError;
 
-pub struct NodeConnection<C> {
-    /// The inner connection.
-    conn: C,
-    info: NodeInfo,
-    handle: Option<Weak<ServerHandle>>,
+    async fn call(&self, triad: KeyTriad<Signed>) -> Result<Self::Response, Self::Error> {
+        let identify_data_r = self.identify_data.read().await;
+
+        let identify_data = match *identify_data_r {
+            Some(value) => value,
+            None => return Err(IdentifyReqError::IdentifyDataInvalid),
+        };
+
+        let cached = triad.signed.to_cached::<IdentifyData>()?;
+        let value = &cached.signable;
+
+        // Check the validity of the signature and the message type
+        if value.msg_type != SignMessageType::Identify
+            || !triad.public_key.valid(&cached.value, &triad.signature)
+        {
+            return Err(IdentifyReqError::SignatureInvalid);
+        }
+
+        // Check if the identify data is the same.
+        if value.obj != identify_data {
+            return Err(IdentifyReqError::IdentifyDataInvalid);
+        }
+
+        if utils::now() > value.obj.expire_time {
+            return Err(IdentifyReqError::Expired)
+        }
+
+        let public_key = triad.public_key;
+        let triad = KeyTriad {
+            public_key,
+            signature: triad.signature,
+            signed: cached,
+        };
+
+        match &self.server_hdl {
+            Some(weak) =>
+            {
+                let hdl = match weak.upgrade() {
+                    Some(value) => value,
+                    None => return Err(IdentifyReqError::NodeHdlDropped),
+                };
+
+                let _ = hdl.key_to_endpoint.insert_async(public_key, self.clone()).await;
+            }
+            None => {}
+        }
+
+        // Add to identities
+        match self.identities.insert_async(public_key, triad).await {
+            Ok(_) => {}
+            Err(_) => return Err(IdentifyReqError::AlreadyIdentified),
+        }
+
+        // Add to vector for enumeration
+        let mut public_keys = self.public_keys.write().await;
+        public_keys.push(public_key);
+
+        Ok(IdentifyResp {})
+    }
 }
-impl<C> NodeConnection<C> {}
