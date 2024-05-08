@@ -28,7 +28,7 @@ impl Endpoint {
         Self {
             ctx,
             addr,
-            conns: Mutex::new(recv)
+            conns: Mutex::new(recv),
         }
     }
 }
@@ -77,19 +77,22 @@ pub fn connection_pair() -> (Connection, Connection) {
     let (send1, recv1) = mpsc::channel(32);
     let (send2, recv2) = mpsc::channel(32);
 
-    (Connection {
-        send_req: send1,
-        recv_req: Mutex::new(recv2),
-    }, Connection {
-        send_req: send2,
-        recv_req: Mutex::new(recv1),
-    })
+    (
+        Connection {
+            send_req: send1,
+            recv_req: Mutex::new(recv2),
+        },
+        Connection {
+            send_req: send2,
+            recv_req: Mutex::new(recv1),
+        },
+    )
 }
 
 #[derive(Error, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Error {
     #[error("stream closed")]
-    Closed
+    Closed,
 }
 
 impl crate::Connection for Connection {
@@ -114,19 +117,16 @@ impl crate::Connection for Connection {
 
         match reqs.recv().await {
             Some(v) => Ok(v),
-            None => Err(Error::Closed)
+            None => Err(Error::Closed),
         }
-
     }
 
     async fn request(&self, req: ReqMessage) -> Result<RespMessage, Self::ReqError> {
         let (resp, recv) = oneshot::channel();
-        let resp = Responder {
-            resp,
-        };
+        let resp = Responder { resp };
 
         match self.send_req.send((req, resp)).await {
-            Ok(_) => {},
+            Ok(_) => {}
             Err(_) => return Err(Error::Closed),
         }
 

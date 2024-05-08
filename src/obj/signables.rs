@@ -1,5 +1,3 @@
-use std::ops::{Deref, DerefMut};
-
 use arcstr::ArcStr;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -56,7 +54,7 @@ impl Signed {
     pub const fn cbor(cbor: Vec<u8>) -> Self {
         Self {
             cbor: Some(cbor),
-            json: None
+            json: None,
         }
     }
     pub const fn json(json: ArcStr) -> Self {
@@ -66,7 +64,8 @@ impl Signed {
         }
     }
     pub fn to_cached<T>(self) -> Result<CachedSigned<T>, SignedConvertError>
-    where for<'a> T: Deserialize<'a>
+    where
+        for<'a> T: Deserialize<'a>,
     {
         let signable = self.to_signable()?;
 
@@ -115,6 +114,5 @@ pub struct IdentifyData {
 
     #[serde(rename = "expireTime")]
     /// The expiration timestamp.
-    pub expire_time: u64
+    pub expire_time: u64,
 }
-

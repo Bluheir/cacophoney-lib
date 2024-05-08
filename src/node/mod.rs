@@ -1,6 +1,6 @@
+use futures::Future;
 use std::convert::Infallible;
 use std::sync::{Arc, Weak};
-use futures::Future;
 
 pub mod error;
 
@@ -14,7 +14,7 @@ use tower_async::Service;
 
 #[derive(Debug)]
 pub struct ServerHandle {
-    key_to_endpoint: scc::HashMap<PublicKey, Arc<InboundEndpoint>>
+    key_to_endpoint: scc::HashMap<PublicKey, Arc<InboundEndpoint>>,
 }
 
 #[derive(Debug)]
@@ -94,7 +94,7 @@ impl Service<KeyTriad<Signed>> for Arc<InboundEndpoint> {
         }
 
         if utils::now() > value.obj.expire_time {
-            return Err(IdentifyReqError::Expired)
+            return Err(IdentifyReqError::Expired);
         }
 
         let public_key = triad.public_key;
@@ -105,14 +105,16 @@ impl Service<KeyTriad<Signed>> for Arc<InboundEndpoint> {
         };
 
         match &self.server_hdl {
-            Some(weak) =>
-            {
+            Some(weak) => {
                 let hdl = match weak.upgrade() {
                     Some(value) => value,
                     None => return Err(IdentifyReqError::NodeHdlDropped),
                 };
 
-                let _ = hdl.key_to_endpoint.insert_async(public_key, self.clone()).await;
+                let _ = hdl
+                    .key_to_endpoint
+                    .insert_async(public_key, self.clone())
+                    .await;
             }
             None => {}
         }

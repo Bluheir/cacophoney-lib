@@ -172,7 +172,11 @@ pub struct KeyTriad<T> {
 impl KeyTriad<Signed> {
     pub fn gen_signed(key: &PrivateKey, identify: &IdentifyData) -> Self {
         let ser = serde_cbor::to_vec(identify).unwrap();
-        
-        KeyTriad { public_key: key.derive_public(), signature: key.sign(&ser), signed: Signed::cbor(ser) }
+
+        KeyTriad {
+            public_key: key.derive_public(),
+            signature: key.sign(&ser),
+            signed: Signed::cbor(ser),
+        }
     }
 }

@@ -29,11 +29,14 @@ macro_rules! convert_impl {
             fn try_from(value: $msg) -> Result<Self, Self::Error> {
                 match value {
                     $msg::$variant(v) => Ok(v),
-                    value @ _ => Err(InvalidTypeError { expected: $name, received: value.object_type() })
+                    value @ _ => Err(InvalidTypeError {
+                        expected: $name,
+                        received: value.object_type(),
+                    }),
                 }
             }
         }
-    }
+    };
 }
 
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, Error)]
@@ -50,7 +53,7 @@ pub enum ReqMessage {
     #[serde(rename = "PRE_IDENTIFY")]
     PreIdentify(PreIdentifyReq),
     #[serde(rename = "IDENTIFY")]
-    Identify(IdentifyReq)
+    Identify(IdentifyReq),
 }
 
 impl ObjectType for ReqMessage {
@@ -71,7 +74,7 @@ pub enum RespMessage {
     #[serde(rename = "NODE_INFO")]
     Connect(NodeInfoResp),
     #[serde(rename = "IDENTIFY")]
-    Identify(IdentifyResp)
+    Identify(IdentifyResp),
 }
 
 impl ObjectType for RespMessage {

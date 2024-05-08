@@ -36,5 +36,5 @@ pub enum IdentifyReqError {
     #[error("already identified key")]
     AlreadyIdentified,
     #[error("{}", .0)]
-    ConvertErr(#[from] SignedConvertError)   
+    ConvertErr(#[from] SignedConvertError),
 }
