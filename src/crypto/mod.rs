@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::obj::{IdentifyData, SignMessageType, Signable, Signed};
 
@@ -50,7 +51,7 @@ impl PublicKey {
 
 /// A private key.
 #[repr(transparent)]
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Serialize, Deserialize, Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Zeroize, ZeroizeOnDrop)]
 #[serde(transparent)]
 pub struct PrivateKey(pub [u8; PRIVATE_KEY_SIZE]);
 
@@ -69,7 +70,7 @@ impl PrivateKey {
     }
 }
 /// A keypair.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Serialize, Deserialize, Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct KeyPair {
     pub public: PublicKey,
     pub private: PrivateKey,
