@@ -169,6 +169,12 @@ pub struct KeyTriad<T> {
     pub signed: T,
 }
 
+impl<T> KeyTriad<T> {
+    pub fn map<U, F: FnOnce(T) -> U>(self, f: F) -> KeyTriad<U> {
+        KeyTriad { public_key: self.public_key, signature: self.signature, signed: f(self.signed) }
+    }
+}
+
 impl KeyTriad<Signed> {
     pub fn gen_signed(key: &PrivateKey, identify: &IdentifyData, msg_type: SignMessageType) -> Self {
         let signable = Signable { msg_type, obj: identify };

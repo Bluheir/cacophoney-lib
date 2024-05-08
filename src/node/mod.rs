@@ -101,11 +101,7 @@ impl Service<KeysExistsReq> for InboundEndpoint {
             };
 
             // map from KeyTriad<CachedSigned<IdentifyData>> to KeyTriad<SignedData>
-            let triad = KeyTriad {
-                public_key: key,
-                signature: triad.signature,
-                signed: triad.signed.value
-            };
+            let triad = triad.map(|value| value.value);
             
             triads.push(triad)
         }

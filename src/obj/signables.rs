@@ -31,6 +31,14 @@ pub enum SignedData {
     #[serde(rename = "CBOR")]
     Cbor(Vec<u8>),
 }
+impl SignedData {
+    pub fn to_signed(self) -> Signed {
+        match self {
+            Self::Json(value) => Signed::json(value),
+            Self::Cbor(value) => Signed::cbor(value),
+        }
+    }
+}
 impl ToHashMsg for &SignedData {
     type Output = HashMsg;
 
