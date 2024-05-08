@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
-use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::obj::{IdentifyData, SignMessageType, Signable, SignedData};
 
@@ -51,26 +50,44 @@ impl PublicKey {
 
 /// A private key.
 #[repr(transparent)]
-#[derive(Serialize, Deserialize, Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Zeroize, ZeroizeOnDrop)]
-#[serde(transparent)]
-pub struct PrivateKey(pub [u8; PRIVATE_KEY_SIZE]);
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(try_from = "[u8; PRIVATE_KEY_SIZE]", into = "[u8; PRIVATE_KEY_SIZE]")]
+pub struct PrivateKey(pub libsecp256k1::SecretKey);
+
+impl std::hash::Hash for PrivateKey {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.serialize().hash(state);
+    }
+}
+impl TryFrom<[u8; PRIVATE_KEY_SIZE]> for PrivateKey {
+    type Error = libsecp256k1::Error;
+
+    fn try_from(value: [u8; PRIVATE_KEY_SIZE]) -> Result<Self, Self::Error> {
+        Ok(Self(libsecp256k1::SecretKey::parse(&value)?))
+    }
+}
+impl From<PrivateKey> for [u8; PRIVATE_KEY_SIZE] {
+    fn from(value: PrivateKey) -> Self {
+        value.0.serialize()
+    }
+}
 
 impl PrivateKey {
+    pub fn new(bytes: [u8; PRIVATE_KEY_SIZE]) -> Self {
+        Self::try_from(bytes).unwrap()
+    }
     pub fn derive_public(&self) -> PublicKey {
-        let seckey = libsecp256k1::SecretKey::parse(&self.0).unwrap();
-        PublicKey(libsecp256k1::PublicKey::from_secret_key(&seckey).serialize_compressed())
+        PublicKey(libsecp256k1::PublicKey::from_secret_key(&self.0).serialize_compressed())
     }
     pub fn sign(&self, msg: impl ToHashMsg) -> Signature {
-        let seckey = libsecp256k1::SecretKey::parse(&self.0).unwrap();
-
         let hashmsg = msg.to_hash_msg();
         let msg = libsecp256k1::Message::parse(&hashmsg.as_ref().0);
 
-        Signature(libsecp256k1::sign(&msg, &seckey).0.serialize())
+        Signature(libsecp256k1::sign(&msg, &self.0).0.serialize())
     }
 }
 /// A keypair.
-#[derive(Serialize, Deserialize, Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Serialize, Deserialize, Debug, Clone, Hash, PartialEq, Eq)]
 pub struct KeyPair {
     pub public: PublicKey,
     pub private: PrivateKey,
