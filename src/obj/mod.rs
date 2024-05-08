@@ -5,7 +5,7 @@ pub use message::*;
 use serde::{Deserialize, Serialize};
 pub use signables::*;
 
-use crate::crypto::KeyTriad;
+use crate::crypto::{KeyTriad, PublicKey};
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct IdentifyReq {
@@ -17,6 +17,17 @@ pub struct IdentifyResp {}
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct PreIdentifyReq {}
+
+/// A request that asks if the specified public keys have connected to the node.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub struct KeysExistsReq { pub keys: Vec<PublicKey> }
+
+/// A response to a [`KeysExistsReq`]. Returns the public keys that have connected to the node,
+/// and the cryptographic proofs that they have connected.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub struct KeysExistsResp {
+    pub triads: Vec<KeyTriad<SignedData>>
+}
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize, Hash,

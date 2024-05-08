@@ -38,3 +38,13 @@ pub enum IdentifyReqError {
     #[error("{}", .0)]
     ConvertErr(#[from] SignedConvertError),
 }
+
+#[derive(Error, Debug)]
+pub enum KeysExistsReqError {
+    /// The service manager is not a node.
+    #[error("this endpoint is not a node")]
+    NotNode,
+    /// This error happens when upgrading a [`Weak`] to an [`std::sync::Arc`] yields [`None`]
+    #[error("all instances of the node handle were dropped")]
+    NodeHdlDropped,
+}

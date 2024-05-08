@@ -14,13 +14,11 @@ use tower_async::Service;
 
 #[derive(Debug)]
 pub struct ServerHandle {
-    key_to_endpoint: scc::HashMap<PublicKey, Arc<InboundEndpoint>>,
+    key_to_endpoint: scc::HashMap<PublicKey, InboundHdl>,
 }
 
-#[derive(Debug)]
-pub struct OutboundEndpoint {
-    server_hdl: Option<Weak<ServerHandle>>,
-}
+/// An endpoint that can be cloned
+pub type InboundHdl = Arc<InboundEndpoint>;
 
 #[derive(Debug)]
 pub struct InboundEndpoint {
@@ -30,6 +28,80 @@ pub struct InboundEndpoint {
     identities: scc::HashMap<PublicKey, KeyTriad<CachedSigned<IdentifyData>>>,
 }
 
+impl InboundEndpoint {
+    pub fn client() -> Self {
+        Self {
+            server_hdl: None,
+            identify_data: Default::default(),
+            public_keys: Default::default(),
+            identities: Default::default(),
+        }
+    }
+    pub fn client_hdl() -> Arc<Self> {
+        Arc::new(Self::client())
+    }
+    pub fn server(server_hdl: Arc<ServerHandle>) -> Self {
+        Self {
+            server_hdl: Some(Arc::downgrade(&server_hdl)),
+            identify_data: Default::default(),
+            public_keys: Default::default(),
+            identities: Default::default(),
+        }
+    }
+    pub fn server_hdl(server_hdl: Arc<ServerHandle>) -> Arc<Self> {
+        Arc::new(Self::server(server_hdl))
+    }
+    pub async fn pre_identify(&self, req: PreIdentifyReq) -> IdentifyData {
+        self.call(req).await.unwrap()
+    }
+    pub async fn identify(
+        self: &InboundHdl,
+        triad: KeyTriad<Signed>,
+    ) -> Result<IdentifyResp, IdentifyReqError> {
+        self.call(triad).await
+    }
+    pub async fn keys_exists(&self, req: KeysExistsReq) -> Result<KeysExistsResp, KeysExistsReqError> {
+        self.call(req).await
+    }
+}
+
+impl Service<KeysExistsReq> for InboundEndpoint {
+    type Response = KeysExistsResp;
+    type Error = KeysExistsReqError;
+
+    async fn call(&self, req: KeysExistsReq) -> Result<Self::Response, Self::Error> {
+        let mut triads = Vec::with_capacity(req.keys.len());
+        let ref server_hdl = *self
+            .server_hdl
+            .as_ref()
+            .ok_or(KeysExistsReqError::NotNode)?
+            .upgrade()
+            .ok_or(KeysExistsReqError::NodeHdlDropped)?;
+
+        for key in req.keys {
+            let hdl = match server_hdl.key_to_endpoint.get_async(&key).await {
+                Some(value) => value.clone(),
+                None => continue,
+            };
+
+            let triad = match hdl.identities.get_async(&key).await {
+                Some(entry) => (*entry).clone(),
+                None => continue,
+            };
+            
+            // map from KeyTriad<CachedSigned<IdentifyData>> to KeyTriad<SignedData>
+            let triad = KeyTriad {
+                public_key: key,
+                signature: triad.signature,
+                signed: triad.signed.value
+            };
+            
+            triads.push(triad)
+        }
+
+        Ok(KeysExistsResp { triads })
+    }
+}
 impl Service<PreIdentifyReq> for InboundEndpoint {
     type Response = IdentifyData;
     type Error = Infallible;
@@ -55,7 +127,7 @@ impl Service<PreIdentifyReq> for InboundEndpoint {
         Ok(identify_data)
     }
 }
-impl Service<PreIdentifyReq> for Arc<InboundEndpoint> {
+impl Service<PreIdentifyReq> for InboundHdl {
     type Response = <InboundEndpoint as Service<PreIdentifyReq>>::Response;
     type Error = <InboundEndpoint as Service<PreIdentifyReq>>::Error;
 
@@ -66,7 +138,7 @@ impl Service<PreIdentifyReq> for Arc<InboundEndpoint> {
         (**self).call(req)
     }
 }
-impl Service<KeyTriad<Signed>> for Arc<InboundEndpoint> {
+impl Service<KeyTriad<Signed>> for InboundHdl {
     type Response = IdentifyResp;
     type Error = IdentifyReqError;
 
