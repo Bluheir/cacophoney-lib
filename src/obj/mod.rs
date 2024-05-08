@@ -9,7 +9,7 @@ use crate::crypto::{KeyTriad, PublicKey};
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct IdentifyReq {
-    pub keys: Vec<KeyTriad<Signed>>,
+    pub keys: Vec<KeyTriad<SignedData>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]

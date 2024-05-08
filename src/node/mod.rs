@@ -67,7 +67,7 @@ impl InboundEndpoint {
     }
     pub async fn identify(
         self: &InboundHdl,
-        triad: KeyTriad<Signed>,
+        triad: KeyTriad<SignedData>,
     ) -> Result<IdentifyResp, IdentifyReqError> {
         self.call(triad).await
     }
@@ -145,11 +145,11 @@ impl Service<PreIdentifyReq> for InboundHdl {
         (**self).call(req)
     }
 }
-impl Service<KeyTriad<Signed>> for InboundHdl {
+impl Service<KeyTriad<SignedData>> for InboundHdl {
     type Response = IdentifyResp;
     type Error = IdentifyReqError;
 
-    async fn call(&self, triad: KeyTriad<Signed>) -> Result<Self::Response, Self::Error> {
+    async fn call(&self, triad: KeyTriad<SignedData>) -> Result<Self::Response, Self::Error> {
         let identify_data_r = self.identify_data.read().await;
 
         let identify_data = match *identify_data_r {

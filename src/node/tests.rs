@@ -1,6 +1,6 @@
 use crate::crypto::PrivateKey;
 use crate::node::{KeyTriad, ServerHandle};
-use crate::obj::{KeysExistsReq, SignMessageType, Signable, Signed};
+use crate::obj::{KeysExistsReq, SignMessageType, Signable, SignedData};
 use crate::{node::InboundEndpoint, obj::PreIdentifyReq};
 
 /// The private key used for the unit tests.
@@ -27,7 +27,7 @@ async fn keys_exists() {
         .unwrap();
     let first = keys_exists.triads.remove(0);
 
-    assert_eq!(first.map(|v| v.to_signed()), triad);
+    assert_eq!(first, triad);
 }
 
 #[tokio::test]
@@ -41,7 +41,7 @@ async fn fake_signature() {
         msg_type: SignMessageType::Identify,
         obj: identify,
     };
-    let ser = Signed::cbor(serde_cbor::to_vec(&signable).unwrap());
+    let ser = SignedData::Cbor(serde_cbor::to_vec(&signable).unwrap());
 
     let triad = KeyTriad {
         public_key: PRIVATE_KEY.derive_public(),
