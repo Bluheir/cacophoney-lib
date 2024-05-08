@@ -1,20 +1,31 @@
 use futures::Future;
 use std::convert::Infallible;
 use std::sync::{Arc, Weak};
-
-pub mod error;
-
-use crate::crypto::*;
-use crate::obj::*;
-use crate::utils;
-use error::*;
 use rand::RngCore;
 use tokio::sync::RwLock;
 use tower_async::Service;
 
-#[derive(Debug)]
+#[cfg(test)]
+mod tests;
+pub mod error;
+
+use error::*;
+use crate::crypto::*;
+use crate::obj::*;
+use crate::utils;
+
+#[derive(Debug, Default)]
 pub struct ServerHandle {
     key_to_endpoint: scc::HashMap<PublicKey, InboundHdl>,
+}
+
+impl ServerHandle {
+    pub fn new() -> Self {
+        Self { key_to_endpoint: Default::default() }
+    }
+    pub fn new_hdl() -> Arc<Self> {
+        Arc::new(Self::new())
+    }
 }
 
 /// An endpoint that can be cloned
@@ -88,7 +99,7 @@ impl Service<KeysExistsReq> for InboundEndpoint {
                 Some(entry) => (*entry).clone(),
                 None => continue,
             };
-            
+
             // map from KeyTriad<CachedSigned<IdentifyData>> to KeyTriad<SignedData>
             let triad = KeyTriad {
                 public_key: key,
