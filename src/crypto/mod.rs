@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
-use crate::obj::{IdentifyData, Signed};
+use crate::obj::{IdentifyData, SignMessageType, Signable, Signed};
 
 /// The size (in bytes) of a public key.
 pub const PUBLIC_KEY_SIZE: usize = 33;
@@ -170,8 +170,9 @@ pub struct KeyTriad<T> {
 }
 
 impl KeyTriad<Signed> {
-    pub fn gen_signed(key: &PrivateKey, identify: &IdentifyData) -> Self {
-        let ser = serde_cbor::to_vec(identify).unwrap();
+    pub fn gen_signed(key: &PrivateKey, identify: &IdentifyData, msg_type: SignMessageType) -> Self {
+        let signable = Signable { msg_type, obj: identify };
+        let ser = serde_cbor::to_vec(&signable).unwrap();
 
         KeyTriad {
             public_key: key.derive_public(),
