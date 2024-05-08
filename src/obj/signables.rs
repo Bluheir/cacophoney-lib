@@ -26,7 +26,9 @@ pub struct CachedSigned<T> {
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub enum SignedData {
+    #[serde(rename = "JSON")]
     Json(ArcStr),
+    #[serde(rename = "CBOR")]
     Cbor(Vec<u8>),
 }
 impl ToHashMsg for &SignedData {
