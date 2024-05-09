@@ -1,82 +1,267 @@
+use arcstr::ArcStr;
+use core::net::SocketAddr;
 use futures::Future;
-use std::convert::Infallible;
-use std::sync::{Arc, Weak};
 use rand::RngCore;
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashSet,
+    convert::Infallible,
+    sync::{Arc, Weak},
+};
 use tokio::sync::RwLock;
 use tower_async::Service;
 
+pub mod error;
 #[cfg(test)]
 mod tests;
-pub mod error;
 
-use error::*;
 use crate::crypto::*;
 use crate::obj::*;
 use crate::utils;
+use error::*;
 
-#[derive(Debug, Default)]
-pub struct ServerHandle {
-    key_to_endpoint: scc::HashMap<PublicKey, InboundHdl>,
+pub trait OpenStream {
+    type Err: StreamOpenError;
+    type Stream;
+
+    fn open_stream(&self, key: PublicKey) -> impl Future<Output = Result<Self::Stream, Self::Err>>;
 }
 
-impl ServerHandle {
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+pub struct ServerInfo {
+    /// The domain name of this server.
+    pub domain: ArcStr,
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct EndpointInfo {
+    /// The server info of this connected endpoint, if they are a server.
+    pub server_info: Option<ServerInfo>,
+    /// The socket address of this connected endpoint.
+    pub endpoint: SocketAddr,
+}
+
+impl EndpointInfo {
+    pub const fn non_server(endpoint: SocketAddr) -> Self {
+        Self {
+            server_info: None,
+            endpoint,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct ServerHandle<C: ?Sized> {
+    /// A map from a public key to a handle.
+    key_to_endpoint: scc::HashMap<PublicKey, InboundHdl<C>>,
+    /// Nodes connected to this endpoint that are also servers.
+    connected_servers: RwLock<HashSet<InboundHdl<C>>>,
+}
+
+impl<C: ?Sized> ServerHandle<C> {
     pub fn new() -> Self {
-        Self { key_to_endpoint: Default::default() }
+        Self {
+            connected_servers: Default::default(),
+            key_to_endpoint: Default::default(),
+        }
     }
     pub fn new_hdl() -> Arc<Self> {
         Arc::new(Self::new())
     }
+    pub async fn connect_server(&self, server_hdl: InboundHdl<C>) -> Result<(), InboundHdl<C>> {
+        if server_hdl.info.server_info.is_none() {
+            // this isn't a server handle, return an error
+            return Err(server_hdl);
+        }
+
+        let mut connected_servers = self.connected_servers.write().await;
+
+        if connected_servers.contains(&server_hdl) {
+            return Err(server_hdl);
+        }
+
+        connected_servers.insert(server_hdl);
+        Ok(())
+    }
 }
 
 /// An endpoint that can be cloned
-pub type InboundHdl = Arc<InboundEndpoint>;
+pub type InboundHdl<C> = Arc<InboundEndpoint<C>>;
 
 #[derive(Debug)]
-pub struct InboundEndpoint {
-    server_hdl: Option<Weak<ServerHandle>>,
+pub struct InboundEndpoint<C: ?Sized> {
+    id: u64,
+    server_hdl: Option<Weak<ServerHandle<C>>>,
     identify_data: RwLock<Option<IdentifyData>>,
     public_keys: RwLock<Vec<PublicKey>>,
     identities: scc::HashMap<PublicKey, KeyTriad<CachedSigned<IdentifyData>>>,
+    info: EndpointInfo,
+    conn: C,
 }
 
-impl InboundEndpoint {
-    pub fn client() -> Self {
+impl<C: ?Sized> PartialEq for InboundEndpoint<C> {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+impl<C: ?Sized> Eq for InboundEndpoint<C> {}
+impl<C: ?Sized> std::hash::Hash for InboundEndpoint<C> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+impl<C> InboundEndpoint<C> {
+    pub fn client(id: u64, info: EndpointInfo, conn: C) -> Self {
         Self {
+            id,
+            conn,
             server_hdl: None,
+            info,
             identify_data: Default::default(),
             public_keys: Default::default(),
             identities: Default::default(),
         }
     }
-    pub fn client_hdl() -> Arc<Self> {
-        Arc::new(Self::client())
+    pub fn client_hdl(id: u64, info: EndpointInfo, conn: C) -> Arc<Self> {
+        Arc::new(Self::client(id, info, conn))
     }
-    pub fn server(server_hdl: Arc<ServerHandle>) -> Self {
+    pub fn server(id: u64, info: EndpointInfo, server_hdl: Arc<ServerHandle<C>>, conn: C) -> Self {
         Self {
+            id,
+            info,
             server_hdl: Some(Arc::downgrade(&server_hdl)),
             identify_data: Default::default(),
             public_keys: Default::default(),
             identities: Default::default(),
+            conn,
         }
     }
-    pub fn server_hdl(server_hdl: Arc<ServerHandle>) -> Arc<Self> {
-        Arc::new(Self::server(server_hdl))
+    pub fn server_hdl(
+        id: u64,
+        info: EndpointInfo,
+        server_hdl: Arc<ServerHandle<C>>,
+        conn: C,
+    ) -> Arc<Self> {
+        Arc::new(Self::server(id, info, server_hdl, conn))
     }
+
+    /// Returns the id of this [`InboundEndpoint`]. Ids are assigned to each connected endpoint.
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+    /// Returns the server info, if any, of this endpoint.
+    pub fn server_info(&self) -> Option<&ServerInfo> {
+        self.info.server_info.as_ref()
+    }
+
     pub async fn pre_identify(&self, req: PreIdentifyReq) -> IdentifyData {
         self.call(req).await.unwrap()
     }
     pub async fn identify(
-        self: &InboundHdl,
+        self: &InboundHdl<C>,
         triad: KeyTriad<SignedData>,
     ) -> Result<IdentifyResp, IdentifyReqError> {
         self.call(triad).await
     }
-    pub async fn keys_exists(&self, req: KeysExistsReq) -> Result<KeysExistsResp, KeysExistsReqError> {
+    pub async fn keys_exists(
+        &self,
+        req: KeysExistsReq,
+    ) -> Result<KeysExistsResp, KeysExistsReqError> {
+        self.call(req).await
+    }
+    pub async fn list_connected(
+        &self,
+        req: ListConnectedServersReq,
+    ) -> Result<ListConnectedServersResp, ListConnectedServersReqError> {
+        self.call(req).await
+    }
+}
+impl<C: OpenStream + ?Sized> InboundEndpoint<C> {
+    pub async fn communicate(
+        &self,
+        req: CommunicationReq,
+    ) -> Result<C::Stream, CommunicationReqError<C::Err>> {
         self.call(req).await
     }
 }
 
-impl Service<KeysExistsReq> for InboundEndpoint {
+impl<C: ?Sized> Service<ListConnectedServersReq> for InboundEndpoint<C> {
+    type Response = ListConnectedServersResp;
+    type Error = ListConnectedServersReqError;
+
+    async fn call(&self, _req: ListConnectedServersReq) -> Result<Self::Response, Self::Error> {
+        let ref server_hdl = *self
+            .server_hdl
+            .as_ref()
+            .ok_or(NotServerError)?
+            .upgrade()
+            .ok_or(ServerHdlDroppedError)?;
+
+        let connected_servers = server_hdl.connected_servers.read().await;
+        let mut servers = Vec::with_capacity(connected_servers.len());
+
+        for server in connected_servers.iter() {
+            let info = &server.info;
+            servers.push(ConnectedServer {
+                ip: info.endpoint.ip(),
+                domain: info.server_info.as_ref().unwrap().domain.clone(),
+            })
+        }
+
+        Ok(ListConnectedServersResp { servers })
+    }
+}
+impl<C: ?Sized> Service<ListConnectedServersReq> for InboundHdl<C> {
+    type Response = <InboundEndpoint<C> as Service<ListConnectedServersReq>>::Response;
+    type Error = <InboundEndpoint<C> as Service<ListConnectedServersReq>>::Error;
+
+    fn call(
+        &self,
+        req: ListConnectedServersReq,
+    ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
+        (&**self).call(req)
+    }
+}
+impl<C: OpenStream + ?Sized> Service<CommunicationReq> for InboundEndpoint<C> {
+    type Response = C::Stream;
+    type Error = CommunicationReqError<C::Err>;
+
+    async fn call(&self, req: CommunicationReq) -> Result<Self::Response, Self::Error> {
+        let ref server_hdl = *self
+            .server_hdl
+            .as_ref()
+            .ok_or(NotServerError)?
+            .upgrade()
+            .ok_or(ServerHdlDroppedError)?;
+
+        // check if this endpoint identified as the public key
+        if !self.identities.contains_async(&req.from).await {
+            return Err(Self::Error::InvalidPublicKey);
+        }
+
+        // get the handle that the initiator will communicate with
+        let to_hdl = match server_hdl.key_to_endpoint.get_async(&req.to).await {
+            Some(value) => value,
+            None => return Err(Self::Error::CannotFindKey),
+        };
+
+        // open a stream to the endpoint
+        Ok(to_hdl.conn.open_stream(req.from).await?)
+    }
+}
+impl<C: OpenStream + ?Sized> Service<CommunicationReq> for InboundHdl<C> {
+    type Response = <InboundEndpoint<C> as Service<CommunicationReq>>::Response;
+    type Error = <InboundEndpoint<C> as Service<CommunicationReq>>::Error;
+
+    fn call(
+        &self,
+        req: CommunicationReq,
+    ) -> impl Future<Output = Result<Self::Response, Self::Error>> {
+        (&**self).call(req)
+    }
+}
+impl<C: ?Sized> Service<KeysExistsReq> for InboundEndpoint<C> {
     type Response = KeysExistsResp;
     type Error = KeysExistsReqError;
 
@@ -85,9 +270,9 @@ impl Service<KeysExistsReq> for InboundEndpoint {
         let ref server_hdl = *self
             .server_hdl
             .as_ref()
-            .ok_or(KeysExistsReqError::NotNode)?
+            .ok_or(NotServerError)?
             .upgrade()
-            .ok_or(KeysExistsReqError::NodeHdlDropped)?;
+            .ok_or(ServerHdlDroppedError)?;
 
         for key in req.keys {
             let hdl = match server_hdl.key_to_endpoint.get_async(&key).await {
@@ -102,14 +287,14 @@ impl Service<KeysExistsReq> for InboundEndpoint {
 
             // map from KeyTriad<CachedSigned<IdentifyData>> to KeyTriad<SignedData>
             let triad = triad.map(|value| value.value);
-            
+
             triads.push(triad)
         }
 
         Ok(KeysExistsResp { triads })
     }
 }
-impl Service<PreIdentifyReq> for InboundEndpoint {
+impl<C: ?Sized> Service<PreIdentifyReq> for InboundEndpoint<C> {
     type Response = IdentifyData;
     type Error = Infallible;
 
@@ -134,9 +319,9 @@ impl Service<PreIdentifyReq> for InboundEndpoint {
         Ok(identify_data)
     }
 }
-impl Service<PreIdentifyReq> for InboundHdl {
-    type Response = <InboundEndpoint as Service<PreIdentifyReq>>::Response;
-    type Error = <InboundEndpoint as Service<PreIdentifyReq>>::Error;
+impl<C: ?Sized> Service<PreIdentifyReq> for InboundHdl<C> {
+    type Response = <InboundEndpoint<C> as Service<PreIdentifyReq>>::Response;
+    type Error = <InboundEndpoint<C> as Service<PreIdentifyReq>>::Error;
 
     fn call(
         &self,
@@ -145,7 +330,7 @@ impl Service<PreIdentifyReq> for InboundHdl {
         (**self).call(req)
     }
 }
-impl Service<KeyTriad<SignedData>> for InboundHdl {
+impl<C: ?Sized> Service<KeyTriad<SignedData>> for InboundHdl<C> {
     type Response = IdentifyResp;
     type Error = IdentifyReqError;
 
@@ -187,7 +372,7 @@ impl Service<KeyTriad<SignedData>> for InboundHdl {
             Some(weak) => {
                 let hdl = match weak.upgrade() {
                     Some(value) => value,
-                    None => return Err(IdentifyReqError::NodeHdlDropped),
+                    None => return Err(ServerHdlDroppedError.into()),
                 };
 
                 let _ = hdl

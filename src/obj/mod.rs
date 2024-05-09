@@ -1,6 +1,9 @@
 mod message;
 mod signables;
 
+use core::net::IpAddr;
+
+use arcstr::ArcStr;
 pub use message::*;
 use serde::{Deserialize, Serialize};
 pub use signables::*;
@@ -27,6 +30,33 @@ pub struct KeysExistsReq { pub keys: Vec<PublicKey> }
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct KeysExistsResp {
     pub triads: Vec<KeyTriad<SignedData>>
+}
+
+/// A request that asks if a client can communicate with another client identifying as a public key. 
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub struct CommunicationReq {
+    /// The public key of the initiator.
+    pub from: PublicKey,
+    /// The public key the initiator wants to communicate with.
+    pub to: PublicKey,
+}
+
+/// A request to list the IP addresses and domain names of the servers that are connected to this node.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub struct ListConnectedServersReq { }
+
+/// A response to a [`ListConnectedServersReq`]. Contains the IP addresses and domain names of the connected servers.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub struct ListConnectedServersResp {
+    pub servers: Vec<ConnectedServer>,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub struct ConnectedServer {
+    /// The IP address of the connected server.
+    pub ip: IpAddr,
+    /// The domain name of the connected server.
+    pub domain: ArcStr,
 }
 
 #[derive(

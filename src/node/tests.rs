@@ -1,21 +1,30 @@
+use core::net::{IpAddr, Ipv4Addr, SocketAddr};
+
 use crate::crypto::PrivateKey;
 use crate::node::{KeyTriad, ServerHandle};
 use crate::obj::{KeysExistsReq, SignMessageType, Signable, SignedData};
 use crate::{node::InboundEndpoint, obj::PreIdentifyReq};
 
-use super::PRIVATE_KEY_SIZE;
+use super::{EndpointInfo, PRIVATE_KEY_SIZE};
 
 /// The private key used for the unit tests.
+/// I do *NOT* recommend using this for anything other than tests.
 const PRIVATE_KEY: [u8; PRIVATE_KEY_SIZE] = [
     59, 120, 176, 12, 17, 37, 95, 32, 64, 53, 178, 193, 44, 9, 148, 4, 187, 63, 144, 195, 132, 19,
     169, 115, 232, 229, 225, 77, 170, 4, 162, 75,
 ];
 
+/// Endpoint info used for the unit tests.
+const ENDPOINT_INFO: EndpointInfo = EndpointInfo::non_server(SocketAddr::new(
+    IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+    51763,
+));
+
 #[tokio::test]
 async fn keys_exists() {
     let key = PrivateKey::new(PRIVATE_KEY);
     let server_hdl = ServerHandle::new_hdl();
-    let hdl = InboundEndpoint::server_hdl(server_hdl.clone());
+    let hdl = InboundEndpoint::server_hdl(0, ENDPOINT_INFO, server_hdl.clone(), ());
 
     let identify = hdl.pre_identify(PreIdentifyReq {}).await;
     let triad = KeyTriad::gen_signed(&key, &identify, SignMessageType::Identify);
@@ -37,7 +46,7 @@ async fn keys_exists() {
 async fn fake_signature() {
     let key = PrivateKey::new(PRIVATE_KEY);
     let server_hdl = ServerHandle::new_hdl();
-    let hdl = InboundEndpoint::server_hdl(server_hdl.clone());
+    let hdl = InboundEndpoint::server_hdl(0, ENDPOINT_INFO, server_hdl.clone(), ());
 
     let identify = hdl.pre_identify(PreIdentifyReq {}).await;
 
