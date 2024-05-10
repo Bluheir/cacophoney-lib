@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
     convert::Infallible,
+    error::Error as StdError,
     sync::{Arc, Weak},
 };
 use tokio::sync::RwLock;
@@ -27,6 +28,16 @@ pub trait OpenStream {
     fn open_stream(&self, key: PublicKey) -> impl Future<Output = Result<Self::Stream, Self::Err>>;
 }
 
+pub trait Notify {
+    type Err: StdError;
+
+    /// Notify this client that the public key has connected.
+    fn notify_connected(
+        &self,
+        triad: &KeyTriad<SignedData>,
+    ) -> impl Future<Output = Result<(), Self::Err>> + Send + Sync;
+}
+
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 pub struct ServerInfo {
     /// The domain name of this server.
@@ -40,7 +51,6 @@ pub struct EndpointInfo {
     /// The socket address of this connected endpoint.
     pub endpoint: SocketAddr,
 }
-
 impl EndpointInfo {
     pub const fn non_server(endpoint: SocketAddr) -> Self {
         Self {
@@ -56,6 +66,8 @@ pub struct ServerHandle<C: ?Sized> {
     key_to_endpoint: scc::HashMap<PublicKey, InboundHdl<C>>,
     /// Nodes connected to this endpoint that are also servers.
     connected_servers: RwLock<HashSet<InboundHdl<C>>>,
+    /// Client handles that requested that they be notified when a public key connects to the node.
+    notifications: scc::HashMap<PublicKey, HashSet<InboundHdl<C>>>,
 }
 
 impl<C: ?Sized> ServerHandle<C> {
@@ -63,6 +75,7 @@ impl<C: ?Sized> ServerHandle<C> {
         Self {
             connected_servers: Default::default(),
             key_to_endpoint: Default::default(),
+            notifications: Default::default(),
         }
     }
     pub fn new_hdl() -> Arc<Self> {
@@ -158,14 +171,8 @@ impl<C> InboundEndpoint<C> {
     pub async fn pre_identify(&self, req: PreIdentifyReq) -> IdentifyData {
         self.call(req).await.unwrap()
     }
-    pub async fn identify(
-        self: &InboundHdl<C>,
-        triad: KeyTriad<SignedData>,
-    ) -> Result<IdentifyResp, IdentifyReqError> {
-        self.call(triad).await
-    }
     pub async fn keys_exists(
-        &self,
+        self: &Arc<Self>,
         req: KeysExistsReq,
     ) -> Result<KeysExistsResp, KeysExistsReqError> {
         self.call(req).await
@@ -183,6 +190,11 @@ impl<C: OpenStream + ?Sized> InboundEndpoint<C> {
         req: CommunicationReq,
     ) -> Result<C::Stream, CommunicationReqError<C::Err>> {
         self.call(req).await
+    }
+}
+impl<C: Notify + Send + Sync + 'static + ?Sized> InboundEndpoint<C> {
+    pub async fn identify(self: &Arc<Self>, triad: KeyTriad<SignedData>) -> Result<IdentifyResp, IdentifyReqError> {
+        self.call(triad).await
     }
 }
 
@@ -261,7 +273,7 @@ impl<C: OpenStream + ?Sized> Service<CommunicationReq> for InboundHdl<C> {
         (&**self).call(req)
     }
 }
-impl<C: ?Sized> Service<KeysExistsReq> for InboundEndpoint<C> {
+impl<C: ?Sized> Service<KeysExistsReq> for InboundHdl<C> {
     type Response = KeysExistsResp;
     type Error = KeysExistsReqError;
 
@@ -274,15 +286,31 @@ impl<C: ?Sized> Service<KeysExistsReq> for InboundEndpoint<C> {
             .upgrade()
             .ok_or(ServerHdlDroppedError)?;
 
+        let notify_when_left = |key: PublicKey| async move {
+            if !req.notify {
+                return;
+            }
+
+            let entry = &mut *server_hdl.notifications.entry_async(key).await.or_default();
+            // Add this handle to the notifiations map.
+            entry.insert(self.clone());
+        };
+
         for key in req.keys {
             let hdl = match server_hdl.key_to_endpoint.get_async(&key).await {
                 Some(value) => value.clone(),
-                None => continue,
+                None => {
+                    notify_when_left(key).await;
+                    continue;
+                }
             };
 
             let triad = match hdl.identities.get_async(&key).await {
                 Some(entry) => (*entry).clone(),
-                None => continue,
+                None => {
+                    notify_when_left(key).await;
+                    continue;
+                }
             };
 
             // map from KeyTriad<CachedSigned<IdentifyData>> to KeyTriad<SignedData>
@@ -330,7 +358,7 @@ impl<C: ?Sized> Service<PreIdentifyReq> for InboundHdl<C> {
         (**self).call(req)
     }
 }
-impl<C: ?Sized> Service<KeyTriad<SignedData>> for InboundHdl<C> {
+impl<C: Notify + Send + Sync + 'static + ?Sized> Service<KeyTriad<SignedData>> for InboundHdl<C> {
     type Response = IdentifyResp;
     type Error = IdentifyReqError;
 
@@ -342,7 +370,7 @@ impl<C: ?Sized> Service<KeyTriad<SignedData>> for InboundHdl<C> {
             None => return Err(IdentifyReqError::IdentifyDataInvalid),
         };
 
-        let cached = triad.signed.to_cached::<IdentifyData>()?;
+        let cached = triad.signed.clone().to_cached::<IdentifyData>()?;
         let value = &cached.signable;
 
         // Check the validity of the signature and the message type
@@ -362,31 +390,51 @@ impl<C: ?Sized> Service<KeyTriad<SignedData>> for InboundHdl<C> {
         }
 
         let public_key = triad.public_key;
-        let triad = KeyTriad {
+        let cached_triad = KeyTriad {
             public_key,
             signature: triad.signature,
             signed: cached,
         };
 
-        match &self.server_hdl {
+        let server_hdl = match &self.server_hdl {
             Some(weak) => {
-                let hdl = match weak.upgrade() {
+                let server_hdl = match weak.upgrade() {
                     Some(value) => value,
                     None => return Err(ServerHdlDroppedError.into()),
                 };
 
-                let _ = hdl
+                let _ = server_hdl
                     .key_to_endpoint
                     .insert_async(public_key, self.clone())
                     .await;
+
+                Some(server_hdl)
             }
-            None => {}
-        }
+            None => None,
+        };
 
         // Add to identities
-        match self.identities.insert_async(public_key, triad).await {
+        match self.identities.insert_async(public_key, cached_triad.clone()).await {
             Ok(_) => {}
             Err(_) => return Err(IdentifyReqError::AlreadyIdentified),
+        }
+
+        // Notify endpoints that wanted to be notified when this public key connected.
+        match server_hdl {
+            Some(server_hdl) => {
+                tokio::spawn(async move {
+                    let endpoints = &*match server_hdl.notifications.get_async(&public_key).await {
+                        Some(value) => value,
+                        None => return,
+                    };
+
+                    for endpoint in endpoints {
+                        // Fire and forget the notification
+                        let _ = endpoint.conn.notify_connected(&triad).await;
+                    }
+                });
+            }
+            None => {}
         }
 
         // Add to vector for enumeration

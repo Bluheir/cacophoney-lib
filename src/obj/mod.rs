@@ -23,16 +23,21 @@ pub struct PreIdentifyReq {}
 
 /// A request that asks if the specified public keys have connected to the node.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
-pub struct KeysExistsReq { pub keys: Vec<PublicKey> }
+pub struct KeysExistsReq {
+    /// The public keys.
+    pub keys: Vec<PublicKey>,
+    /// If a public key in `keys` has not connected to the node, notify the client when it connects.
+    pub notify: bool,
+}
 
 /// A response to a [`KeysExistsReq`]. Returns the public keys that have connected to the node,
 /// and the cryptographic proofs that they have connected.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct KeysExistsResp {
-    pub triads: Vec<KeyTriad<SignedData>>
+    pub triads: Vec<KeyTriad<SignedData>>,
 }
 
-/// A request that asks if a client can communicate with another client identifying as a public key. 
+/// A request that asks if a client can communicate with another client identifying as a public key.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct CommunicationReq {
     /// The public key of the initiator.
@@ -43,7 +48,7 @@ pub struct CommunicationReq {
 
 /// A request to list the IP addresses and domain names of the servers that are connected to this node.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
-pub struct ListConnectedServersReq { }
+pub struct ListConnectedServersReq {}
 
 /// A response to a [`ListConnectedServersReq`]. Contains the IP addresses and domain names of the connected servers.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
