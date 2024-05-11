@@ -21,11 +21,15 @@ use crate::obj::*;
 use crate::utils;
 use error::*;
 
-pub trait OpenStream {
+pub trait OpenStream: Service<PublicKey, Error = <Self as OpenStream>::Err> {
     type Err: StreamOpenError;
-    type Stream;
 
-    fn open_stream(&self, key: PublicKey) -> impl Future<Output = Result<Self::Stream, Self::Err>>;
+    fn open_stream(
+        &self,
+        key: PublicKey,
+    ) -> impl Future<Output = Result<Self::Response, Self::Err>> {
+        self.call(key)
+    }
 }
 
 pub trait Notify {
@@ -124,6 +128,25 @@ impl<C: ?Sized> std::hash::Hash for InboundEndpoint<C> {
     }
 }
 
+macro_rules! service_fn {
+    ($fn_name:ident, $input:ty) => {
+        pub fn $fn_name(&self, req: $input) -> impl Future<Output = Result<<Self as Service<$input>>::Response, <Self as Service<$input>>::Error>> + '_
+        where Self: Service<$input>
+        {
+            self.call(req)
+        }
+    };
+}
+macro_rules! service_fn_hdl {
+    ($fn_name:ident, $input:ty) => {
+        pub async fn $fn_name(self: &Arc<Self>, req: $input) -> Result<<Arc<Self> as Service<$input>>::Response, <Arc<Self> as Service<$input>>::Error>
+        where Arc<Self>: Service<$input>
+        {
+            self.call(req).await
+        }
+    };
+}
+
 impl<C> InboundEndpoint<C> {
     pub fn client(id: u64, info: EndpointInfo, conn: C) -> Self {
         Self {
@@ -168,34 +191,14 @@ impl<C> InboundEndpoint<C> {
         self.info.server_info.as_ref()
     }
 
+    // service related functions:
     pub async fn pre_identify(&self, req: PreIdentifyReq) -> IdentifyData {
         self.call(req).await.unwrap()
     }
-    pub async fn keys_exists(
-        self: &Arc<Self>,
-        req: KeysExistsReq,
-    ) -> Result<KeysExistsResp, KeysExistsReqError> {
-        self.call(req).await
-    }
-    pub async fn list_connected(
-        &self,
-        req: ListConnectedServersReq,
-    ) -> Result<ListConnectedServersResp, ListConnectedServersReqError> {
-        self.call(req).await
-    }
-}
-impl<C: OpenStream + ?Sized> InboundEndpoint<C> {
-    pub async fn communicate(
-        &self,
-        req: CommunicationReq,
-    ) -> Result<C::Stream, CommunicationReqError<C::Err>> {
-        self.call(req).await
-    }
-}
-impl<C: Notify + Send + Sync + 'static + ?Sized> InboundEndpoint<C> {
-    pub async fn identify(self: &Arc<Self>, triad: KeyTriad<SignedData>) -> Result<IdentifyResp, IdentifyReqError> {
-        self.call(triad).await
-    }
+    service_fn!(list_connected, ListConnectedServersReq);
+    service_fn!(communicate, CommunicationReq);
+    service_fn_hdl!(identify, KeyTriad<SignedData>);
+    service_fn_hdl!(keys_exists, KeysExistsReq);
 }
 
 impl<C: ?Sized> Service<ListConnectedServersReq> for InboundEndpoint<C> {
@@ -236,7 +239,7 @@ impl<C: ?Sized> Service<ListConnectedServersReq> for InboundHdl<C> {
     }
 }
 impl<C: OpenStream + ?Sized> Service<CommunicationReq> for InboundEndpoint<C> {
-    type Response = C::Stream;
+    type Response = C::Response;
     type Error = CommunicationReqError<C::Err>;
 
     async fn call(&self, req: CommunicationReq) -> Result<Self::Response, Self::Error> {
@@ -414,7 +417,11 @@ impl<C: Notify + Send + Sync + 'static + ?Sized> Service<KeyTriad<SignedData>> f
         };
 
         // Add to identities
-        match self.identities.insert_async(public_key, cached_triad.clone()).await {
+        match self
+            .identities
+            .insert_async(public_key, cached_triad.clone())
+            .await
+        {
             Ok(_) => {}
             Err(_) => return Err(IdentifyReqError::AlreadyIdentified),
         }
@@ -423,12 +430,14 @@ impl<C: Notify + Send + Sync + 'static + ?Sized> Service<KeyTriad<SignedData>> f
         match server_hdl {
             Some(server_hdl) => {
                 tokio::spawn(async move {
-                    let endpoints = &*match server_hdl.notifications.get_async(&public_key).await {
-                        Some(value) => value,
-                        None => return,
-                    };
+                    let endpoints =
+                        match server_hdl.notifications.remove_async(&public_key).await {
+                            Some(value) => value,
+                            None => return,
+                        }
+                        .1;
 
-                    for endpoint in endpoints {
+                    for endpoint in endpoints.into_iter() {
                         // Fire and forget the notification
                         let _ = endpoint.conn.notify_connected(&triad).await;
                     }
