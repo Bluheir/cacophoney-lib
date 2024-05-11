@@ -130,8 +130,14 @@ impl<C: ?Sized> std::hash::Hash for InboundEndpoint<C> {
 
 macro_rules! service_fn {
     ($fn_name:ident, $input:ty) => {
-        pub fn $fn_name(&self, req: $input) -> impl Future<Output = Result<<Self as Service<$input>>::Response, <Self as Service<$input>>::Error>> + '_
-        where Self: Service<$input>
+        pub fn $fn_name(
+            &self,
+            req: $input,
+        ) -> impl Future<
+            Output = Result<<Self as Service<$input>>::Response, <Self as Service<$input>>::Error>,
+        > + '_
+        where
+            Self: Service<$input>,
         {
             self.call(req)
         }
@@ -139,8 +145,12 @@ macro_rules! service_fn {
 }
 macro_rules! service_fn_hdl {
     ($fn_name:ident, $input:ty) => {
-        pub async fn $fn_name(self: &Arc<Self>, req: $input) -> Result<<Arc<Self> as Service<$input>>::Response, <Arc<Self> as Service<$input>>::Error>
-        where Arc<Self>: Service<$input>
+        pub async fn $fn_name(
+            self: &Arc<Self>,
+            req: $input,
+        ) -> Result<<Arc<Self> as Service<$input>>::Response, <Arc<Self> as Service<$input>>::Error>
+        where
+            Arc<Self>: Service<$input>,
         {
             self.call(req).await
         }

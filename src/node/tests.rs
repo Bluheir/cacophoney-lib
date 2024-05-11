@@ -32,9 +32,7 @@ impl Notify for DummyNotify {
         &self,
         _triad: &KeyTriad<SignedData>,
     ) -> impl Future<Output = Result<(), Self::Err>> + Send + Sync {
-        async {
-            unimplemented!()
-        }
+        async { unimplemented!() }
     }
 }
 
