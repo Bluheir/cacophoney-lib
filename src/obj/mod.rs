@@ -1,7 +1,7 @@
 mod message;
 mod signables;
 
-use core::net::IpAddr;
+use core::net::{IpAddr, SocketAddr};
 
 use arcstr::ArcStr;
 pub use message::*;
@@ -84,4 +84,27 @@ pub struct NodeInfoResp {
     pub compatible: bool,
     /// The node info sent in response.
     pub info: NodeInfo,
+}
+
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+pub struct ServerInfo {
+    /// The domain name of this server.
+    pub domain: ArcStr,
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct EndpointInfo {
+    /// The server info of this connected endpoint, if they are a server.
+    pub server_info: Option<ServerInfo>,
+    /// The socket address of this connected endpoint.
+    pub endpoint: SocketAddr,
+}
+impl EndpointInfo {
+    pub const fn non_server(endpoint: SocketAddr) -> Self {
+        Self {
+            server_info: None,
+            endpoint,
+        }
+    }
 }
