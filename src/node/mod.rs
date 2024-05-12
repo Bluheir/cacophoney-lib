@@ -215,7 +215,7 @@ impl<C: ?Sized> Service<ListConnectedServersReq> for InboundEndpoint<C> {
     type Response = ListConnectedServersResp;
     type Error = ListConnectedServersReqError;
 
-    async fn call(&self, _req: ListConnectedServersReq) -> Result<Self::Response, Self::Error> {
+    async fn call(&self, req: ListConnectedServersReq) -> Result<Self::Response, Self::Error> {
         let ref server_hdl = *self
             .server_hdl
             .as_ref()
@@ -224,9 +224,13 @@ impl<C: ?Sized> Service<ListConnectedServersReq> for InboundEndpoint<C> {
             .ok_or(ServerHdlDroppedError)?;
 
         let connected_servers = server_hdl.connected_servers.read().await;
-        let mut servers = Vec::with_capacity(connected_servers.len());
+        let mut servers = Vec::with_capacity(req.max.map(|value| value as usize).unwrap_or(connected_servers.len()));
 
-        for server in connected_servers.iter() {
+        for (index, server) in connected_servers.iter().enumerate() {
+            if Some(index as u32 + 1) == req.max {
+                break;
+            }
+
             let info = &server.info;
             servers.push(ConnectedServer {
                 ip: info.endpoint.ip(),

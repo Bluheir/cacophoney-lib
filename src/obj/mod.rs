@@ -48,7 +48,10 @@ pub struct CommunicationReq {
 
 /// A request to list the IP addresses and domain names of the servers that are connected to this node.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
-pub struct ListConnectedServersReq {}
+pub struct ListConnectedServersReq {
+    /// The maximum amount of connected servers to list. Is [`None`] if there is no limit.
+    pub max: Option<u32>,
+}
 
 /// A response to a [`ListConnectedServersReq`]. Contains the IP addresses and domain names of the connected servers.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
