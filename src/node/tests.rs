@@ -1,5 +1,6 @@
 use core::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::convert::Infallible;
+use std::sync::Arc;
 
 use futures::Future;
 
@@ -71,7 +72,8 @@ async fn fake_signature() {
         msg_type: SignMessageType::Identify,
         obj: identify,
     };
-    let ser = SignedData::Cbor(serde_cbor::to_vec(&signable).unwrap());
+    let data = serde_cbor::to_vec(&signable).unwrap();
+    let ser = SignedData::Cbor(Arc::from(data));
 
     let triad = KeyTriad {
         public_key: key.derive_public(),

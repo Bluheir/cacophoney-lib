@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
@@ -212,7 +214,7 @@ impl KeyTriad<SignedData> {
         KeyTriad {
             public_key: key.derive_public(),
             signature: key.sign(&ser),
-            signed: SignedData::Cbor(ser),
+            signed: SignedData::Cbor(Arc::from(ser)),
         }
     }
 }

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use arcstr::ArcStr;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -27,7 +29,7 @@ pub enum SignedData {
     #[serde(rename = "JSON")]
     Json(ArcStr),
     #[serde(rename = "CBOR")]
-    Cbor(Vec<u8>),
+    Cbor(Arc<[u8]>),
 }
 impl SignedData {
     pub fn to_signable<'a, T: Deserialize<'a>>(
@@ -35,7 +37,7 @@ impl SignedData {
     ) -> Result<Signable<T>, SignedConvertError> {
         Ok(match self {
             SignedData::Json(json) => serde_json::from_str(json.as_str())?,
-            SignedData::Cbor(cbor) => serde_cbor::from_slice(&cbor)?,
+            SignedData::Cbor(cbor) => serde_cbor::from_slice(cbor)?,
         })
     }
     pub fn to_cached<T>(self) -> Result<CachedSigned<T>, SignedConvertError>

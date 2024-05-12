@@ -17,7 +17,7 @@ thiserror = "1.0.58"
 serde_with = "3.8.1"
 serde_json = "1.0.116"
 serde_cbor = "0.11.2"
-serde = { version = "1.0.0", features = ["derive"] }
+serde = { version = "1.0.0", features = ["derive", "rc"] }
 
 # other
 scc = "2.1.1"
