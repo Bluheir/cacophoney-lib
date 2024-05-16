@@ -9,7 +9,7 @@ use crate::node::{KeyTriad, ServerHandle};
 use crate::obj::{KeysExistsReq, SignMessageType, Signable, SignedData};
 use crate::{node::InboundEndpoint, obj::PreIdentifyReq};
 
-use super::{EndpointInfo, Notify, PRIVATE_KEY_SIZE};
+use super::{ConnectedServer, EndpointInfo, Notify, PRIVATE_KEY_SIZE};
 
 /// The private key used for the unit tests.
 /// I do *NOT* recommend using this for anything other than tests.
@@ -35,6 +35,11 @@ impl Notify for DummyNotify {
     ) -> impl Future<Output = Result<(), Self::Err>> + Send + Sync {
         async { unimplemented!() }
     }
+}
+
+#[allow(unused)]
+fn dummy_info() -> ConnectedServer {
+    ConnectedServer { ip: "127.0.0.1".parse().unwrap(), domain: arcstr::literal!("") }
 }
 
 #[tokio::test]
