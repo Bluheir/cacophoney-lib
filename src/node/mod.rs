@@ -39,7 +39,7 @@ pub trait Notify {
     ) -> impl Future<Output = Result<(), Self::Err>> + Send + Sync;
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ServerHandle<C: ?Sized> {
     /// A map from a public key to a handle.
     key_to_endpoint: scc::HashMap<PublicKey, InboundHdl<C>>,
@@ -186,9 +186,67 @@ impl<C> InboundEndpoint<C> {
     service_fn_hdl!(keys_exists, KeysExistsReq);
 }
 
+impl<C: Service<KeysExistsRReq, Response = KeysExistsRResp> + ?Sized> Service<KeysExistsRReq> for InboundEndpoint<C> {
+    type Response = KeysExistsRResp;
+    type Error = ServerReqError;
+
+    async fn call(&self, mut req: KeysExistsRReq) -> Result<Self::Response, Self::Error> {
+        let ref server_hdl = *self
+            .server_hdl
+            .as_ref()
+            .ok_or(NotServerError)?
+            .upgrade()
+            .ok_or(ServerHdlDroppedError)?;
+
+        let mut keys: Vec<_> = req.keys.iter().cloned().collect();
+        let mut triads = Vec::new();
+        let mut offset = 0;
+
+        for (index, key) in req.keys.iter().enumerate() {
+            let hdl = match server_hdl.key_to_endpoint.get_async(key).await {
+                Some(value) => value.clone(),
+                None => continue,
+            };
+
+            let triad = match hdl.identities.get_async(key).await {
+                Some(entry) => (*entry).clone(),
+                None => continue,
+            };
+
+            let triad = KeyConnectedTo { triad: triad.map(|value| value.value), connected_to: vec![] };
+            triads.push(triad);
+            keys.remove(index - offset);
+            offset += 1;
+        }
+
+        // If all the public keys were connected to this server OR the request depth is 0, return
+        if req.depth == 0 || req.keys.len() == 0 {
+            return Ok(KeysExistsRResp { triads })
+        }
+
+        req.keys = keys.into();
+        req.depth -= 1;
+
+        // ask other nodes for the triads corresponding to the remaining public keys
+        for node in server_hdl.connected_servers.read().await.iter() {
+            let req = KeysExistsRReq {
+                keys: req.keys.clone(),
+                depth: req.depth
+            };
+            let resp = match node.conn.call(req).await {
+                Ok(resp) => resp,
+                Err(_) => continue,
+            };
+
+            triads.extend(resp.triads.into_iter().map(|mut value| { value.connected_to.push(node.info.server_info.as_ref().unwrap().clone()); value }))
+        }
+
+        Ok(KeysExistsRResp { triads })
+    }
+}
 impl<C: ?Sized> Service<ListConnectedServersReq> for InboundEndpoint<C> {
     type Response = ListConnectedServersResp;
-    type Error = ListConnectedServersReqError;
+    type Error = ServerReqError;
 
     async fn call(&self, req: ListConnectedServersReq) -> Result<Self::Response, Self::Error> {
         let ref server_hdl = *self
@@ -199,7 +257,11 @@ impl<C: ?Sized> Service<ListConnectedServersReq> for InboundEndpoint<C> {
             .ok_or(ServerHdlDroppedError)?;
 
         let connected_servers = server_hdl.connected_servers.read().await;
-        let mut servers = Vec::with_capacity(req.max.map(|value| value as usize).unwrap_or(connected_servers.len()));
+        let mut servers = Vec::with_capacity(
+            req.max
+                .map(|value| value as usize)
+                .unwrap_or(connected_servers.len()),
+        );
 
         for (index, server) in connected_servers.iter().enumerate() {
             if Some(index as u32 + 1) == req.max {
@@ -307,7 +369,6 @@ impl<C: ?Sized> Service<KeysExistsReq> for InboundHdl<C> {
 
             // map from KeyTriad<CachedSigned<IdentifyData>> to KeyTriad<SignedData>
             let triad = triad.map(|value| value.value);
-
             triads.push(triad)
         }
 

@@ -87,9 +87,9 @@ pub enum CommunicationReqError<Err: StreamOpenError> {
     StreamOpenErr(#[from] Err),
 }
 
-/// An error that can occur when an endpoint initiates a communication request to another public key.
+/// A minimal error that can occur when doing a server-only request.
 #[derive(Error, Debug)]
-pub enum ListConnectedServersReqError {
+pub enum ServerReqError {
     /// Refer to [`NotServerError`].
     #[error("{}", .0)]
     NotServer(#[from] NotServerError),

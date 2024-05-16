@@ -2,6 +2,7 @@ mod message;
 mod signables;
 
 use core::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
 
 use arcstr::ArcStr;
 pub use message::*;
@@ -35,6 +36,32 @@ pub struct KeysExistsReq {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub struct KeysExistsResp {
     pub triads: Vec<KeyTriad<SignedData>>,
+}
+
+/// A request that asks if the specified public keys have connected to the node.
+/// If any of the public keys have not connected to the node, sends this request
+/// to other nodes at a depth of `depth - 1`.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub struct KeysExistsRReq {
+    pub keys: Arc<[PublicKey]>,
+    pub depth: u32,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub struct KeysExistsRResp {
+    pub triads: Vec<KeyConnectedTo>,
+}
+
+/// Represents a public key that is connected to an endpoint.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub struct KeyConnectedTo {
+    /// The associated key triad.
+    pub triad: KeyTriad<SignedData>,
+    /// Represents the chain of nodes that propagated the [`KeysExistsRReq`] to other nodes.
+    /// The 0th element is the domain name and IP address of the server the public key is connected to.
+    /// If there are no elements in this, that means the public key is connected to the current node.
+    #[serde(rename = "connectedTo")]
+    pub connected_to: Vec<ServerInfo>,
 }
 
 /// A request that asks if a client can communicate with another client identifying as a public key.
@@ -85,7 +112,6 @@ pub struct NodeInfoResp {
     /// The node info sent in response.
     pub info: NodeInfo,
 }
-
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 pub struct ServerInfo {
